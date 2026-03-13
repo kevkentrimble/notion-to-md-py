@@ -13,7 +13,8 @@ class NotionToMarkdownBase:
         default_config = {
             "separate_child_page": False,
             "convert_images_to_base64": False,
-            "parse_child_pages": True
+            "parse_child_pages": True,
+            "max_depth": None
         }
         self.config = {**default_config, **(config or {})}
         self.custom_transformers = {}
@@ -121,12 +122,15 @@ class NotionToMarkdown(NotionToMarkdownBase):
 
     def block_list_to_markdown(self, blocks: List[Dict] = None,
                                total_pages: Optional[int] = None,
-                               md_blocks: List[Dict] = None) -> List[Dict]:
+                               md_blocks: List[Dict] = None,
+                               depth: int = 0) -> List[Dict]:
         """Convert Notion blocks to markdown blocks"""
         if md_blocks is None:
             md_blocks = []
         if not blocks:
             return md_blocks
+
+        max_depth = self.config.get('max_depth')
 
         for block in blocks:
             if (block['type'] == 'unsupported' or
@@ -139,23 +143,27 @@ class NotionToMarkdown(NotionToMarkdownBase):
                                block['synced_block'].get('synced_from')
                             else block['id'])
 
-                child_blocks = get_block_children(self.notion_client,
-                                                  block_id,
-                                                  total_pages)
-
                 md_blocks.append({
                     'type': block['type'],
                     'block_id': block['id'],
-                    'parent': self.block_to_markdown(block),
+                    'parent': self.block_to_markdown(block, depth=depth),
                     'children': []
                 })
+
+                if max_depth is not None and depth >= max_depth:
+                    continue
+
+                child_blocks = get_block_children(self.notion_client,
+                                                  block_id,
+                                                  total_pages)
 
                 if not (block['type'] in self.custom_transformers):
                     # append blocks to md_blocks[-1]['children']
                     self.block_list_to_markdown(
                         child_blocks,
                         total_pages,
-                        md_blocks[-1]['children'])
+                        md_blocks[-1]['children'],
+                        depth=depth + 1)
                 continue
 
             md_blocks.append({
@@ -167,7 +175,7 @@ class NotionToMarkdown(NotionToMarkdownBase):
 
         return md_blocks
 
-    def block_to_markdown(self, block: Dict) -> str:
+    def block_to_markdown(self, block: Dict, depth: int = 0) -> str:
         """Convert a single Notion block to markdown"""
         if not isinstance(block, dict) or 'type' not in block:
             return ""
@@ -342,8 +350,13 @@ class NotionToMarkdown(NotionToMarkdownBase):
             if not block['has_children']:
                 return md.callout(callout_string, block['callout'].get('icon'))
 
+            max_depth = self.config.get('max_depth')
+            if max_depth is not None and depth >= max_depth:
+                callout_string += f"{parsed_data}\n"
+                return md.callout(callout_string.strip(), block['callout'].get('icon'))
+
             callout_children_object = get_block_children(self.notion_client, block['id'], 100)
-            callout_children = self.block_list_to_markdown(callout_children_object)
+            callout_children = self.block_list_to_markdown(callout_children_object, depth=depth + 1)
 
             callout_string += f"{parsed_data}\n"
             for child in callout_children:
@@ -380,12 +393,15 @@ class NotionToMarkdownAsync(NotionToMarkdownBase):
 
     async def block_list_to_markdown(self, blocks: List[Dict] = None,
                                      total_pages: Optional[int] = None,
-                                     md_blocks: List[Dict] = None) -> List[Dict]:
+                                     md_blocks: List[Dict] = None,
+                                     depth: int = 0) -> List[Dict]:
         """Convert Notion blocks to markdown blocks"""
         if md_blocks is None:
             md_blocks = []
         if not blocks:
             return md_blocks
+
+        max_depth = self.config.get('max_depth')
 
         for block in blocks:
             if (block['type'] == 'unsupported' or
@@ -398,21 +414,25 @@ class NotionToMarkdownAsync(NotionToMarkdownBase):
                                block['synced_block'].get('synced_from')
                             else block['id'])
 
+                md_blocks.append({
+                    'type': block['type'],
+                    'block_id': block['id'],
+                    'parent': await self.block_to_markdown(block, depth=depth),
+                    'children': []
+                })
+
+                if max_depth is not None and depth >= max_depth:
+                    continue
+
                 child_blocks = await get_block_children_async(self.notion_client,
                                                               block_id,
                                                               total_pages)
 
-                md_blocks.append({
-                    'type': block['type'],
-                    'block_id': block['id'],
-                    'parent': await self.block_to_markdown(block),
-                    'children': []
-                })
-
                 if not (block['type'] in self.custom_transformers):
                     await self.block_list_to_markdown(child_blocks,
                                                       total_pages,
-                                                      md_blocks[-1]['children'])
+                                                      md_blocks[-1]['children'],
+                                                      depth=depth + 1)
                 continue
 
             md_blocks.append({
@@ -424,7 +444,7 @@ class NotionToMarkdownAsync(NotionToMarkdownBase):
 
         return md_blocks
 
-    async def block_to_markdown(self, block: Dict) -> str:
+    async def block_to_markdown(self, block: Dict, depth: int = 0) -> str:
         """Convert a single Notion block to markdown"""
         if not isinstance(block, dict) or 'type' not in block:
             return ""
@@ -599,8 +619,13 @@ class NotionToMarkdownAsync(NotionToMarkdownBase):
             if not block['has_children']:
                 return md.callout(callout_string, block['callout'].get('icon'))
 
+            max_depth = self.config.get('max_depth')
+            if max_depth is not None and depth >= max_depth:
+                callout_string += f"{parsed_data}\n"
+                return md.callout(callout_string.strip(), block['callout'].get('icon'))
+
             callout_children_object = await get_block_children_async(self.notion_client, block['id'], 100)
-            callout_children = await self.block_list_to_markdown(callout_children_object)
+            callout_children = await self.block_list_to_markdown(callout_children_object, depth=depth + 1)
 
             callout_string += f"{parsed_data}\n"
             for child in callout_children:
